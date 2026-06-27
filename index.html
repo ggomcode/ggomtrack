@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <title>AI 출결 관리 시스템</title>
+  <?!= include('styles'); ?>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Outfit:wght@400;600;800&display=swap"
+    rel="stylesheet">
+</head>
+
+<body>
+  <div class="app-container">
+    <nav class="sidebar">
+      <div class="logo">
+        <span class="icon">📊</span> <span class="text">ggomtrack AI</span>
+      </div>
+      <ul class="nav-links">
+        <li class="active" onclick="showSection('dashboard')">
+          <span class="icon">🏠</span> <span class="text">대시보드</span>
+        </li>
+        <li onclick="showSection('upload')">
+          <span class="icon">📤</span> <span class="text">스캔본 업로드</span>
+        </li>
+        <li onclick="showSection('neis')">
+          <span class="icon">🔄</span> <span class="text">NEIS 데이터 대조</span>
+        </li>
+        <li onclick="showSection('settings')">
+          <span class="icon">⚙️</span> <span class="text">시스템 설정</span>
+        </li>
+      </ul>
+    </nav>
+    <main class="content">
+      <header class="top-bar">
+        <h1 id="section-title">대시보드</h1>
+        <div class="user-profile">
+          <span class="status-badge online">연결됨</span>
+        </div>
+      </header>
+      <!-- Section: Dashboard -->
+      <section id="dashboard" class="page-section active">
+        <div class="card hide-on-print"
+          style="display: flex; gap: 15px; align-items: center; margin-bottom: 20px; padding: 15px; flex-wrap: wrap;">
+          <label style="font-weight: bold; font-size: 0.95em;">조회 조건 설정:</label>
+          <select id="filter-month" style="width: 120px; padding: 6px; border-radius: 4px; border: 1px solid #ccc;">
+            <option value="all">전체 월</option>
+            <option value="3">3월</option>
+            <option value="4">4월</option>
+            <option value="5">5월</option>
+            <option value="6">6월</option>
+            <option value="7">7월</option>
+            <option value="8">8월</option>
+            <option value="9">9월</option>
+            <option value="10">10월</option>
+            <option value="11">11월</option>
+            <option value="12">12월</option>
+            <option value="1">1월</option>
+            <option value="2">2월</option>
+          </select>
+          <select id="filter-class" style="width: 120px; padding: 6px; border-radius: 4px; border: 1px solid #ccc;">
+            <option value="all">전체 학급</option>
+            <option value="1">1반</option>
+            <option value="2">2반</option>
+            <option value="3">3반</option>
+            <option value="4">4반</option>
+            <option value="5">5반</option>
+            <option value="6">6반</option>
+            <option value="7">7반</option>
+            <option value="8">8반</option>
+            <option value="9">9반</option>
+            <option value="10">10반</option>
+            <option value="11">11반</option>
+            <option value="12">12반</option>
+          </select>
+          <button onclick="loadDashboardAnalytics()" class="btn primary btn-sm" style="padding: 6px 12px;">조회</button>
+          <button onclick="generatePdfReport()" class="btn btn-sm"
+            style="padding: 6px 12px; background:#495057; color:white; margin-left:auto;">📄 보고서 출력 (PDF)</button>
+        </div>
+        <div id="batch-print-wrapper"></div>
+        <div id="interactive-dashboard-content">
+          <div class="stats-grid">
+            <div class="stat-card">
+              <h3>현재 조건 스캔 건수</h3>
+              <p class="value" id="stat-total-scans">-</p>
+            </div>
+            <div class="stat-card"
+              style="border-left: 4px solid #f59f00; display: flex; flex-direction: column; justify-content: space-between; align-items: center; min-height: 140px;">
+              <h3 style="margin-bottom: auto;">NEIS 통계 총합</h3>
+              <p class="value warning" id="stat-neis-count" style="margin-top: 10px; margin-bottom: 5px;">-</p>
+              <button onclick="openMultiDayDocsModal()" class="btn"
+                style="margin-top: 5px; font-size: 0.72rem; padding: 4px 8px; background: #fff9db; border: 1px solid #ffd43b; color: #f59f00; border-radius: 6px; font-weight: 700; width: 100%;">🔍
+                복수 일자 서류 내역</button>
+            </div>
+            <div class="stat-card" style="border-left: 4px solid #1c7ed6;">
+              <h3>데이터 일치율</h3>
+              <p class="value info" id="stat-match-rate">-</p>
+            </div>
+          </div>
+          <div class="recent-records card">
+            <h2>스캔 PDF 기록</h2>
+            <div class="table-container" style="max-height: 300px; overflow-y: auto;">
+              <table id="attendance-table" style="width: 100%;">
+                <thead style="position: sticky; top: 0; background: #f8f9fa;">
+                  <tr>
+                    <th>학번</th>
+                    <th>성명</th>
+                    <th>구분 (소분류)</th>
+                    <th>병원/발행일(P열)</th>
+                    <th>사유 상세</th>
+                    <th>첨부서류</th>
+                    <th>보완사항</th>
+                    <th>조치</th>
+                  </tr>
+                </thead>
+                <tbody id="filtered-records-body">
+                  <tr>
+                    <td colspan="8" style="text-align:center; color:#999; padding:30px;">[조회] 버튼을 눌러주세요</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px;">
+            <div class="card">
+              <h2>⚠️ 대조 오류 현황 <small style="color:#666; font-weight:normal; font-size:0.8em;"
+                  id="mismatch-count">0건</small></h2>
+              <div class="table-container" style="max-height: 280px; overflow-y: auto;">
+                <table class="compare-table" style="width: 100%; font-size: 0.9em;">
+                  <thead>
+                    <tr>
+                      <th>기준월</th>
+                      <th>성명</th>
+                      <th>학번</th>
+                      <th>오류 유형</th>
+                      <th>상세 내역</th>
+                    </tr>
+                  </thead>
+                  <tbody id="analytics-mismatch-body">
+                    <tr>
+                      <td colspan="5" style="text-align:center; color:#999; padding:20px;">[조회] 버튼을 눌러주세요</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div class="card">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                <h2 style="margin:0;">🌟 개근 학생 명단
+                  <span id="perfect-count" class="badge"
+                    style="background:#2b8a3e; color:white; font-size:0.8em; vertical-align:middle; margin-left:10px;">0명</span>
+                </h2>
+                <button onclick="loadPerfectAttendance()" class="btn btn-sm primary"
+                  style="padding:4px 10px; font-size:0.85em;">🔍 개근 학생 조회</button>
+              </div>
+              <p style="font-size: 0.8em; color: #666; margin-bottom: 10px;">스캔본 및 NEIS 기록이 모두 없는 깨끗한 무결점 학생입니다.</p>
+              <div id="analytics-perfect-body"
+                style="display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 10px; max-height: 260px; overflow-y: auto; padding: 10px; background: #f8f9fa; border-radius: 8px;">
+                <div style="grid-column: 1/-1; text-align: center; color:#999; padding:20px;">[개근 학생 조회] 버튼을 눌러주세요</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <!-- Section: Upload -->
+      <section id="upload" class="page-section">
+        <div class="upload-container card">
+          <div id="drop-zone" class="drop-zone">
+            <span class="drop-zone__prompt">파일을 여기에 끌어다 놓거나 클릭하여 업로드하세요. (PDF, JPG, PNG)</span>
+            <input type="file" name="myFile" id="file-input" class="drop-zone__input" accept="image/*,application/pdf"
+              multiple>
+          </div>
+          <div class="upload-warning-notice"
+            style="display: flex; align-items: flex-start; gap: 10px; margin-top: 15px; padding: 12px 16px; background-color: #fff9db; border: 1px solid #ffd43b; border-radius: 12px; color: #f08c00; font-size: 0.88rem; font-weight: 500; line-height: 1.5;">
+            <span style="font-size: 1.1rem; line-height: 1; flex-shrink: 0; margin-top: 2px;">⚠️</span>
+            <span><strong>업로드 안내:</strong> PDF 파일 크기가 <strong>30MB</strong>가 넘을 경우 에러가 발생할 수 있으니 <strong>분할하여
+                업로드</strong>해 주세요.</span>
+          </div>
+          <div id="upload-status" class="upload-status"></div>
+          <div id="extraction-preview" class="extraction-preview card hidden">
+            <div
+              style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; border-bottom: 1px solid #e9ecef; padding-bottom: 15px;">
+              <div>
+                <h3 style="margin: 0; font-size: 1.2rem; color: var(--text-main);">추출 결과 확인 (AI 분석)</h3>
+                <p style="font-size: 0.8em; color: var(--text-muted); margin: 4px 0 0 0;">※ AI 분석 결과이므로 반드시 재검토 하시기
+                  바랍니다.</p>
+              </div>
+              <button id="save-all-btn" class="btn primary"
+                style="margin: 0; padding: 10px 20px; font-weight: bold; background: linear-gradient(135deg, var(--primary), var(--secondary)); border: none; box-shadow: 0 4px 15px rgba(74, 144, 226, 0.25); border-radius: 10px;">모두
+                시트로 저장</button>
+            </div>
+            <div id="preview-list" style="margin-bottom: 10px;"></div>
+          </div>
+        </div>
+      </section>
+      <!-- Section: NEIS Compare -->
+      <section id="neis" class="page-section">
+        <div class="card">
+          <h2>NEIS 학급별출결현황 업로드 (.csv, .xls, .xlsx)</h2>
+          <p>NEIS 출결 통계를 업로드하여 월별 스캔본 기록과 대조합니다.<br />
+            <small style="color: #6aa84f; font-weight: bold;">※ NEIS 원본 데이터를 그대로 업로드해주세요.</small>
+          </p>
+          <div style="margin-top: 20px; display: flex; flex-direction: column; gap: 15px;">
+            <div style="display: flex; gap: 12px; align-items: center;">
+              <span style="font-weight: 700; color: #495057; font-size: 0.95rem;">📅 대상 월 선택:</span>
+              <select id="neis-month-select"
+                style="padding: 8px 12px; border-radius: 8px; border: 1px solid #ced4da; font-weight: bold; width: 140px; font-size: 0.9rem;">
+                <option value="">대상 월 선택</option>
+                <option value="3">3월</option>
+                <option value="4">4월</option>
+                <option value="5">5월</option>
+                <option value="6">6월</option>
+                <option value="7">7월</option>
+                <option value="8">8월</option>
+                <option value="9">9월</option>
+                <option value="10">10월</option>
+                <option value="11">11월</option>
+                <option value="12">12월</option>
+                <option value="1">1월</option>
+                <option value="2">2월</option>
+              </select>
+            </div>
+            <div id="neis-drop-zone" class="drop-zone"
+              style="height: 140px; border-color: #e0666633; background-color: #fffafb;">
+              <span class="drop-zone__prompt" id="neis-drop-prompt"
+                style="color: #555; text-align: center; padding: 0 20px;">NEIS 파일을 여기에 끌어다 놓거나 클릭하여 추가하세요. (.csv, .xls,
+                .xlsx)</span>
+              <input type="file" id="neis-file-input" class="drop-zone__input"
+                accept=".csv, .xls, .xlsx, application/vnd.ms-excel, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                multiple>
+            </div>
+            <div id="neis-file-list"
+              style="font-size: 0.85rem; color: #495057; max-height: 150px; overflow-y: auto; padding: 12px; background: #f8f9fa; border-radius: 12px; border: 1px solid #e9ecef; display: none;">
+              <strong style="display: block; margin-bottom: 8px; color: #e06666;">📁 선택된 NEIS 파일 목록:</strong>
+              <ul id="neis-selected-files-ul"
+                style="list-style-type: none; padding-left: 0; margin: 0; display: flex; flex-direction: column; gap: 6px;">
+              </ul>
+            </div>
+            <button onclick="processNeis()" class="btn secondary"
+              style="width: 100%; padding: 14px; background: linear-gradient(135deg, #e06666, #c0392b); color: white; font-size: 1rem; border-radius: 12px; box-shadow: 0 4px 15px rgba(224, 102, 102, 0.2);">🔄
+              업로드 및 비교 시작</button>
+          </div>
+        </div>
+        <!-- [New] Re-generate AttendanceData Card (Premium Layout) -->
+        <div class="card" style="margin-top: 20px; border-left: 5px solid #228be6; background-color: #f8f9fa;">
+          <h2
+            style="color: #228be6; display: flex; align-items: center; gap: 8px; font-size: 1.25rem; margin-bottom: 12px;">
+            <span>🔄 기존 데이터로 대조 시트 즉시 재생성</span>
+          </h2>
+          <p style="color: #495057; font-size: 0.9rem; line-height: 1.6; margin-bottom: 15px;">
+            이미 NeisData 시트에 데이터가 있고 AttendanceDB(스캔본)가 존재한다면, 지정한 월과 학급에 해당하는 원본 데이터를 대조하여 대조 시트를 재생성(업데이트)합니다.
+          </p>
+          <div
+            style="display: flex; gap: 15px; align-items: center; margin-bottom: 15px; flex-wrap: wrap; background: #ffffff; padding: 12px; border-radius: 10px; border: 1px solid #e9ecef;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-weight: 700; color: #495057; font-size: 0.9rem;">📅 대상 월:</span>
+              <select id="rebuild-month-select"
+                style="padding: 6px 10px; border-radius: 6px; border: 1px solid #ced4da; font-weight: bold; font-size: 0.9rem; width: 110px;">
+                <option value="all">전체 월</option>
+                <option value="3">3월</option>
+                <option value="4">4월</option>
+                <option value="5">5월</option>
+                <option value="6">6월</option>
+                <option value="7">7월</option>
+                <option value="8">8월</option>
+                <option value="9">9월</option>
+                <option value="10">10월</option>
+                <option value="11">11월</option>
+                <option value="12">12월</option>
+                <option value="1">1월</option>
+                <option value="2">2월</option>
+              </select>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-weight: 700; color: #495057; font-size: 0.9rem;">🏫 대상 학급:</span>
+              <select id="rebuild-class-select"
+                style="padding: 6px 10px; border-radius: 6px; border: 1px solid #ced4da; font-weight: bold; font-size: 0.9rem; width: 110px;">
+                <option value="all">전체 학급</option>
+                <option value="1">1반</option>
+                <option value="2">2반</option>
+                <option value="3">3반</option>
+                <option value="4">4반</option>
+                <option value="5">5반</option>
+                <option value="6">6반</option>
+                <option value="7">7반</option>
+                <option value="8">8반</option>
+                <option value="9">9반</option>
+                <option value="10">10반</option>
+                <option value="11">11반</option>
+                <option value="12">12반</option>
+              </select>
+            </div>
+          </div>
+          <button onclick="rebuildAttendanceData()" class="btn primary"
+            style="width: 100%; padding: 12px; background: linear-gradient(135deg, #228be6, #1c7ed6); color: white; border-radius: 10px; font-weight: bold; border: none;">⚡
+            대조 시트 즉시 재생성</button>
+        </div>
+        <div id="compare-results" class="card hidden">
+          <h3>대조 결과 분석</h3>
+          <div id="mismatch-container"></div>
+        </div>
+      </section>
+      <!-- Section: Settings -->
+      <section id="settings" class="page-section">
+        <!-- 학년 및 학급 설정 카드 -->
+        <div class="card" style="border-left: 5px solid #4a90e2; margin-bottom: 20px;">
+          <h2>⚙️ 학년 및 학급 설정</h2>
+          <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 15px;">이 시스템에서 관리할 대상 학년과 전체 학급 수를 설정합니다. 설정된 학년 외의 데이터는 대조 및 분석에서 제외됩니다.</p>
+          <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+              <div>
+                <label style="font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px; display: block;">대상 학년</label>
+                <select id="setting-grade" style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem;">
+                  <option value="1">1학년</option>
+                  <option value="2">2학년</option>
+                  <option value="3" selected>3학년</option>
+                  <option value="4">4학년</option>
+                  <option value="5">5학년</option>
+                  <option value="6">6학년</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px; display: block;">전체 학급 수</label>
+                <select id="setting-classes" style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem;">
+                  <option value="1">1학급</option>
+                  <option value="2">2학급</option>
+                  <option value="3">3학급</option>
+                  <option value="4">4학급</option>
+                  <option value="5">5학급</option>
+                  <option value="6">6학급</option>
+                  <option value="7">7학급</option>
+                  <option value="8">8학급</option>
+                  <option value="9">9학급</option>
+                  <option value="10">10학급</option>
+                  <option value="11">11학급</option>
+                  <option value="12" selected>12학급</option>
+                  <option value="13">13학급</option>
+                  <option value="14">14학급</option>
+                  <option value="15">15학급</option>
+                  <option value="16">16학급</option>
+                  <option value="17">17학급</option>
+                  <option value="18">18학급</option>
+                  <option value="19">19학급</option>
+                  <option value="20">20학급</option>
+                </select>
+              </div>
+            </div>
+            <button onclick="saveSystemSettings()" class="btn primary" style="padding: 10px; font-size: 0.9rem; border-radius: 8px; background: linear-gradient(135deg, #4a90e2, #5c6bc0); border: none; color: white; font-weight: bold; cursor: pointer;">💾 설정 저장</button>
+          </div>
+        </div>
+
+        <!-- API 및 폴더 설정 카드 -->
+        <div class="card" style="border-left: 5px solid #10b981; margin-bottom: 20px;">
+          <h2>🔑 시스템 API 및 폴더 설정</h2>
+          <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 15px;">Gemini API 키 및 구글 드라이브 폴더 ID는 구글 서버의 안전한 스크립트 속성(Script Properties)에 저장되어 Git에 커밋되지 않습니다.</p>
+          <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+            <div>
+              <label style="font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px; display: block;">Gemini API Key</label>
+              <input type="password" id="setting-gemini-key" placeholder="AIzaSy..." style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem;">
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+              <div>
+                <label style="font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px; display: block;">스캔본 업로드 폴더 ID</label>
+                <input type="text" id="setting-upload-id" placeholder="Google Drive 폴더 ID" style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem;">
+              </div>
+              <div>
+                <label style="font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px; display: block;">NEIS 파일 보관 폴더 ID</label>
+                <input type="text" id="setting-neis-id" placeholder="Google Drive 폴더 ID" style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem;">
+              </div>
+            </div>
+            <button onclick="saveApiSettings()" class="btn primary" style="padding: 10px; font-size: 0.9rem; border-radius: 8px; background: linear-gradient(135deg, #10b981, #059669); border: none; color: white; font-weight: bold; cursor: pointer;">💾 API 및 폴더 설정 저장</button>
+          </div>
+        </div>
+
+
+        <div class="card" style="border-left: 5px solid #9c27b0;">
+          <h2>📅 시험기간 일정 관리</h2>
+          <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 15px;">시험기간 중에는 생리 결석의 경우도 서류 제출이 필수
+            체크됩니다.</p>
+          <div class="table-container"
+            style="margin-bottom: 20px; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: none;">
+            <table class="compare-table" style="margin-top: 0;">
+              <thead>
+                <tr>
+                  <th>시험명</th>
+                  <th>시작일</th>
+                  <th>종료일</th>
+                  <th style="text-align: center; width: 80px;">관리</th>
+                </tr>
+              </thead>
+              <tbody id="exam-list-tbody">
+                <tr>
+                  <td colspan="4" style="text-align: center; color: var(--text-muted); padding: 30px 10px;">등록된 시험기간 일정이
+                    없습니다.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div
+            style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+            <h3 style="margin: 0; font-size: 0.95rem; color: #475569; border-bottom: none; padding-bottom: 0;">➕ 신규 시험일정
+              추가</h3>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+              <div>
+                <label
+                  style="font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px; display: block;">시작일</label>
+                <input type="date" id="exam-start-date"
+                  style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem;"
+                  required>
+              </div>
+              <div>
+                <label
+                  style="font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px; display: block;">종료일
+                  (선택)</label>
+                <input type="date" id="exam-end-date"
+                  style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem;">
+              </div>
+            </div>
+            <div>
+              <label
+                style="font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px; display: block;">시험명</label>
+              <input type="text" id="exam-name" placeholder="예: 1학기 중간고사"
+                style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem;"
+                required>
+            </div>
+            <button onclick="submitExamPeriod()" class="btn accent"
+              style="padding: 10px; font-size: 0.9rem; border-radius: 8px; background: linear-gradient(135deg, #9c27b0, #7b1fa2); border: none; color: white;">💾
+              시험기간 추가 등록</button>
+          </div>
+        </div>
+        <div class="card">
+          <h2>📊 데이터 관리</h2>
+          <p>테스트 중 입력된 AttendanceDB 및 NeisData의 모든 내용을 삭제합니다. (제목 행 유지)</p>
+          <button onclick="confirmReset()" class="btn danger" style="width: 100%;">DB 전량 초기화 (데이터 삭제)</button>
+        </div>
+        <div class="card">
+          <h2>⚙️ 시스템 초기화</h2>
+          <p>시스템을 처음 사용하는 경우 아래 버튼을 눌러 시트를 생성하세요.</p>
+          <button onclick="initSystem()" class="btn accent">시트 구조 생성/복구</button>
+          <div id="init-log" class="log-output"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <!-- Modal: Multi-Day Documents -->
+  <div id="multi-day-modal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2>📄 복수 일자 서류 내역 조회</h2>
+        <button onclick="closeMultiDayDocsModal()" class="close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 15px;">스캔본 1건에 여러 일수가 등록되어 있는 목록입니다.</p>
+        <div class="table-container" style="max-height: 400px; overflow-y: auto;">
+          <table class="compare-table">
+            <thead>
+              <tr>
+                <th style="text-align: center;">기준월</th>
+                <th>성명</th>
+                <th style="text-align: center;">학번</th>
+                <th>구분 (소분류)</th>
+                <th>등록 기간 (일수)</th>
+                <th>증빙 서류 파일명</th>
+              </tr>
+            </thead>
+            <tbody id="multi-day-modal-body">
+              <tr>
+                <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 30px;">조회 중입니다...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- Loading Overlay -->
+  <div id="loading" class="overlay hidden">
+    <div class="spinner"></div>
+    <p>AI가 분석 중입니다...</p>
+  </div>
+  <?!= include('scripts'); ?>
+</body>
+
+</html>

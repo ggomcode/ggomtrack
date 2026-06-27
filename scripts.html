@@ -1,0 +1,657 @@
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+
+  // 학년 및 학급 설정 값 캐싱
+  let systemSettings = { grade: 3, classes: 12 };
+
+  function initApp() {
+    google.script.run.withSuccessHandler(settings => {
+      systemSettings = settings;
+      updateClassDropdowns(settings.classes);
+
+      const gradeSelect = document.getElementById('setting-grade');
+      const classesSelect = document.getElementById('setting-classes');
+      if (gradeSelect) gradeSelect.value = settings.grade;
+      if (classesSelect) classesSelect.value = settings.classes;
+
+      const geminiInput = document.getElementById('setting-gemini-key');
+      const uploadInput = document.getElementById('setting-upload-id');
+      const neisInput = document.getElementById('setting-neis-id');
+      if (geminiInput) geminiInput.value = settings.geminiApiKey || '';
+      if (uploadInput) uploadInput.value = settings.uploadFolderId || '';
+      if (neisInput) neisInput.value = settings.neisFolderId || '';
+    }).getSystemSettings();
+  }
+
+  // 페이지 로드 시 앱 초기화 실행
+  window.addEventListener('DOMContentLoaded', initApp);
+
+  function updateClassDropdowns(totalClasses) {
+    const dropdownIds = ['filter-class', 'rebuild-class-select'];
+    dropdownIds.forEach(id => {
+      const select = document.getElementById(id);
+      if (!select) return;
+      select.innerHTML = '<option value="all">전체 학급</option>';
+      for (let i = 1; i <= totalClasses; i++) {
+        select.innerHTML += `<option value="${i}">${i}반</option>`;
+      }
+    });
+  }
+
+  function saveSystemSettings() {
+    const grade = document.getElementById('setting-grade').value;
+    const classes = document.getElementById('setting-classes').value;
+
+    const loading = document.getElementById('loading');
+    loading.querySelector('p').textContent = "설정 저장 중...";
+    loading.classList.remove('hidden');
+
+    google.script.run.withSuccessHandler(res => {
+      loading.classList.add('hidden');
+      if (res.success) {
+        alert("설정이 성공적으로 저장되었습니다.");
+        systemSettings = { grade: parseInt(grade, 10), classes: parseInt(classes, 10) };
+        updateClassDropdowns(systemSettings.classes);
+      } else {
+        alert("설정 저장 실패: " + res.error);
+      }
+    }).withFailureHandler(err => {
+      loading.classList.add('hidden');
+      alert("에러 발생: " + err);
+    }).saveSystemSettings(grade, classes);
+  }
+
+  function saveApiSettings() {
+    const geminiKey = document.getElementById('setting-gemini-key').value;
+    const uploadId = document.getElementById('setting-upload-id').value;
+    const neisId = document.getElementById('setting-neis-id').value;
+
+    const loading = document.getElementById('loading');
+    loading.querySelector('p').textContent = "API 및 폴더 설정 저장 중...";
+    loading.classList.remove('hidden');
+
+    google.script.run.withSuccessHandler(res => {
+      loading.classList.add('hidden');
+      if (res.success) {
+        alert("API 및 폴더 설정이 성공적으로 저장되었습니다.");
+      } else {
+        alert("설정 저장 실패: " + res.error);
+      }
+    }).withFailureHandler(err => {
+      loading.classList.add('hidden');
+      alert("에러 발생: " + err);
+    }).saveApiSettings(geminiKey, uploadId, neisId);
+  }
+
+  function showSection(id) {
+    document.querySelectorAll('.page-section').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.nav-links li').forEach(li => li.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+    const activeLi = Array.from(document.querySelectorAll('.nav-links li')).find(li => li.getAttribute('onclick').includes(id));
+    if (activeLi) activeLi.classList.add('active');
+    const titleMap = { 'dashboard': '대시보드', 'upload': '스캔본 업로드', 'neis': 'NEIS 데이터 대조', 'settings': '시스템 설정' };
+    document.getElementById('section-title').textContent = titleMap[id];
+    if (id === 'settings') {
+      loadExamPeriods();
+      const gradeSelect = document.getElementById('setting-grade');
+      const classesSelect = document.getElementById('setting-classes');
+      if (gradeSelect) gradeSelect.value = systemSettings.grade;
+      if (classesSelect) classesSelect.value = systemSettings.classes;
+    }
+  }
+
+  function loadExamPeriods() {
+    const tbody = document.getElementById('exam-list-tbody');
+    if (!tbody) return;
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 20px;">데이터 로딩 중...</td></tr>`;
+    google.script.run.withSuccessHandler(periods => {
+      if (!periods || periods.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 30px 10px;">등록된 시험기간 일정이 없습니다.</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = periods.map(p => `
+        <tr>
+          <td style="font-weight: 600; vertical-align: middle; text-align: left;">${p.name}</td>
+          <td style="font-family: monospace; vertical-align: middle;">${p.startStr}</td>
+          <td style="font-family: monospace; vertical-align: middle;">${p.endStr || p.startStr}</td>
+          <td style="text-align: center; vertical-align: middle;"><button onclick="removeExamPeriod(${p.index})" class="btn danger" style="padding: 6px 12px; font-size: 0.8rem; border-radius: 6px; margin: 0; min-width: auto;">삭제</button></td>
+        </tr>
+      `).join('');
+    }).withFailureHandler(err => {
+      tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: #c0392b; padding: 20px;">❌ 로딩 실패: ${err.message || err}</td></tr>`;
+    }).getExamPeriods();
+  }
+
+  function submitExamPeriod() {
+    const startInput = document.getElementById('exam-start-date');
+    const endInput = document.getElementById('exam-end-date');
+    const nameInput = document.getElementById('exam-name');
+    const startVal = startInput.value;
+    const endVal = endInput.value || startVal;
+    const nameVal = nameInput.value.trim();
+    if (!startVal) return alert("시작일을 입력하세요.");
+    if (!nameVal) return alert("시험명을 입력하세요.");
+    const loading = document.getElementById('loading');
+    loading.querySelector('p').textContent = "시험기간 일정 등록 중...";
+    loading.classList.remove('hidden');
+    google.script.run.withSuccessHandler(res => {
+      loading.classList.add('hidden');
+      if (res.success) {
+        startInput.value = ""; endInput.value = ""; nameInput.value = ""; loadExamPeriods();
+      } else { alert("등록 실패: " + res.error); }
+    }).withFailureHandler(err => {
+      loading.classList.add('hidden'); alert("에러 발생: " + err);
+    }).addExamPeriod(startVal, endVal, nameVal);
+  }
+
+  function removeExamPeriod(rowIndex) {
+    if (!confirm("이 시험 일정을 정말 삭제하시겠습니까?")) return;
+    const loading = document.getElementById('loading');
+    loading.querySelector('p').textContent = "시험기간 일정 삭제 중...";
+    loading.classList.remove('hidden');
+    google.script.run.withSuccessHandler(res => {
+      loading.classList.add('hidden');
+      if (res.success) loadExamPeriods();
+      else alert("삭제 실패: " + res.error);
+    }).withFailureHandler(err => {
+      loading.classList.add('hidden'); alert("에러 발생: " + err);
+    }).deleteExamPeriod(rowIndex);
+  }
+
+  function initSystem() {
+    const log = document.getElementById('init-log');
+    log.innerHTML = "초기화 시작 중...";
+    google.script.run.withSuccessHandler(res => { log.innerHTML = "✅ " + res; }).withFailureHandler(err => { log.innerHTML = "❌ 에러: " + err; }).initializeSheets();
+  }
+
+  function confirmReset() {
+    if (confirm("정말로 모든 데이터를 삭제하시겠습니까?")) {
+      document.getElementById('loading').querySelector('p').textContent = "데이터 초기화 중...";
+      document.getElementById('loading').classList.remove('hidden');
+      google.script.run.withSuccessHandler(res => {
+        document.getElementById('loading').classList.add('hidden'); alert(res); location.reload();
+      }).withFailureHandler(err => {
+        document.getElementById('loading').classList.add('hidden'); alert("실패: " + err);
+      }).resetDatabase();
+    }
+  }
+
+  const dropZone = document.getElementById('drop-zone');
+  const fileInput = document.getElementById('file-input');
+  ['dragover', 'dragleave', 'drop'].forEach(evt => {
+    dropZone.addEventListener(evt, e => {
+      e.preventDefault(); e.stopPropagation();
+      if (evt === 'dragover') dropZone.classList.add('drop-zone--over');
+      else dropZone.classList.remove('drop-zone--over');
+    });
+  });
+  dropZone.addEventListener('click', () => fileInput.click());
+  dropZone.addEventListener('drop', e => handleFiles(e.dataTransfer.files));
+  fileInput.addEventListener('change', () => handleFiles(fileInput.files));
+
+  const neisDropZone = document.getElementById('neis-drop-zone');
+  const neisFileInput = document.getElementById('neis-file-input');
+  let neisFilesToUpload = [];
+  ['dragover', 'dragleave', 'drop'].forEach(evt => {
+    neisDropZone.addEventListener(evt, e => {
+      e.preventDefault(); e.stopPropagation();
+      if (evt === 'dragover') neisDropZone.classList.add('drop-zone--over');
+      else neisDropZone.classList.remove('drop-zone--over');
+    });
+  });
+  neisDropZone.addEventListener('click', () => neisFileInput.click());
+  neisDropZone.addEventListener('drop', e => {
+    if (e.dataTransfer.files.length > 0) { neisFileInput.files = e.dataTransfer.files; updateNeisFileList(e.dataTransfer.files); }
+  });
+  neisFileInput.addEventListener('change', () => updateNeisFileList(neisFileInput.files));
+
+  function updateNeisFileList(fileList) {
+    neisFilesToUpload = Array.from(fileList);
+    const fileListDiv = document.getElementById('neis-file-list');
+    const ul = document.getElementById('neis-selected-files-ul');
+    if (neisFilesToUpload.length === 0) {
+      fileListDiv.style.display = 'none'; ul.innerHTML = '';
+      document.getElementById('neis-drop-prompt').innerHTML = "NEIS 파일을 여기에 끌어다 놓거나 클릭하여 추가하세요.";
+      return;
+    }
+    fileListDiv.style.display = 'block';
+    document.getElementById('neis-drop-prompt').innerHTML = `선택된 파일: ${neisFilesToUpload.length}개`;
+    ul.innerHTML = neisFilesToUpload.map((f, idx) => {
+      const sizeStr = f.size > 1024 * 1024 ? (f.size / (1024 * 1024)).toFixed(2) + " MB" : (f.size / 1024).toFixed(1) + " KB";
+      return `<li style="display:flex; justify-content:space-between; align-items:center; padding:6px 12px; background:#fff; border:1px solid #dee2e6; border-radius:8px;">
+        <span>📄 ${f.name} <small>(${sizeStr})</small></span>
+        <button type="button" onclick="removeNeisFile(${idx})" style="background:none; border:none; color:#fa5252; font-weight:bold; cursor:pointer;">&times;</button>
+      </li>`;
+    }).join('');
+  }
+
+  window.removeNeisFile = function (idx) {
+    neisFilesToUpload.splice(idx, 1);
+    const dt = new DataTransfer();
+    neisFilesToUpload.forEach(f => dt.items.add(f));
+    neisFileInput.files = dt.files;
+    updateNeisFileList(dt.files);
+  };
+
+  async function handleFiles(fileList) {
+    const loading = document.getElementById('loading');
+    loading.classList.remove('hidden');
+    const files = Array.from(fileList).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+    try {
+      for (const file of files) await processFile(file);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      loading.classList.add('hidden');
+      document.getElementById('extraction-preview').classList.remove('hidden');
+    }
+  }
+
+  function processFile(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        const base64 = e.target.result;
+        if (file.type.startsWith('image/')) {
+          sendToAi(file.name, base64, base64, resolve);
+        } else if (file.type === 'application/pdf') {
+          renderPdfThumbnail(file, (t) => sendToAi(file.name, base64, t, resolve));
+        } else {
+          sendToAi(file.name, base64, null, resolve);
+        }
+      };
+      reader.onerror = () => { alert("파일 읽기 에러: " + file.name); resolve(); };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function renderPdfThumbnail(file, callback) {
+    const reader = new FileReader();
+    reader.onload = async function () {
+      const typedarray = new Uint8Array(this.result);
+      try {
+        const pdf = await pdfjsLib.getDocument(typedarray).promise;
+        const page = await pdf.getPage(1);
+        const viewport = page.getViewport({ scale: 0.3 });
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.height = viewport.height; canvas.width = viewport.width;
+        await page.render({ canvasContext: context, viewport: viewport }).promise;
+        callback(canvas.toDataURL());
+      } catch (e) { callback(null); }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function sendToAi(filename, base64, thumb, callback) {
+    google.script.run.withSuccessHandler(res => {
+      try {
+        if (res.success) {
+          res.data.forEach(item => processItemWithValidation(filename, item, thumb));
+        } else { alert(filename + " 분석 실패: " + res.error); }
+      } catch (err) { alert(filename + " 처리 중 오류 발생"); } finally { if (callback) callback(); }
+    }).withFailureHandler(err => {
+      alert("서버 에러: " + err); if (callback) callback();
+    }).processAttendanceFile(filename, base64);
+  }
+
+  async function processItemWithValidation(filename, item, thumb) {
+    if (item.ruleCheck && item.ruleCheck.includes("질병 대체 서류 검증")) {
+      const absenceDate = (item.periodStart && item.periodStart.includes('-')) ? item.periodStart : item.date;
+      const dateParts = absenceDate.split('-');
+      if (dateParts.length === 3) {
+        const year = parseInt(dateParts[0]); const month = parseInt(dateParts[1]) - 1; const day = parseInt(dateParts[2]);
+        const d = new Date(year, month, day); const dayOfWeek = d.getDay();
+        const hospitalKeywords = ["진료", "진단", "소견", "처방", "통원", "입원", "약국", "병원"];
+        const isHospitalDoc = hospitalKeywords.some(kw => item.attachments && item.attachments.includes(kw));
+        if (dayOfWeek === 1 && !isHospitalDoc) {
+          item.ruleCheck = "⚠️ 보완 필요: 월요일은 학부모/담임 확인서로 결석 대체 불가";
+        } else {
+          const prev = new Date(year, month, day);
+          if (dayOfWeek === 0) prev.setDate(d.getDate() - 2); else prev.setDate(d.getDate() - 1);
+          const prevStr = prev.getFullYear() + "-" + String(prev.getMonth() + 1).padStart(2, '0') + "-" + String(prev.getDate()).padStart(2, '0');
+          const foundInFront = extractedItems.some(ex => String(ex.studentId).trim() === String(item.studentId).trim() && ex.date === prevStr && ex.subCategory && ex.subCategory.includes('질병') && ex.attachments && (ex.attachments.includes('진료') || ex.attachments.includes('진단')));
+          if (foundInFront) {
+            item.ruleCheck = "✅ 정상 (전일 병원기록 동시 업로드 확인됨)";
+          } else {
+            try {
+              const foundInBack = await new Promise((resolve, reject) => {
+                google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).checkPreviousDayHospitalDoc(item.studentId, absenceDate);
+              });
+              if (foundInBack) item.ruleCheck = "✅ 정상 (전일 병원기록 DB 확인됨)";
+              else item.ruleCheck = "⚠️ 보완 필요: 전일 병원 발생 서류 누락";
+            } catch (e) { item.ruleCheck = "⚠️ 검증 오류"; }
+          }
+        }
+      }
+    }
+    addPreviewItem(filename, item, thumb);
+  }
+
+  function checkLoadingDone(callback) { if (callback) callback(); }
+
+  let extractedItems = [];
+  function addPreviewItem(filename, data, thumb) {
+    extractedItems.push({ ...data, filename });
+    const container = document.getElementById('preview-list');
+    const item = document.createElement('div');
+    item.className = 'card preview-item';
+    item.style.borderLeft = "5px solid #6aa84f"; item.style.padding = "20px";
+    const isPositive = data.ruleCheck && (data.ruleCheck.includes('✅') || data.ruleCheck.includes('정상'));
+    const ruleBadgeColor = isPositive ? '#ebfbee' : '#fff5f5';
+    const ruleTextColor = isPositive ? '#2b8a3e' : '#c92a2a';
+    let docDateStr = data.docStartDate || "";
+    if (data.docEndDate && data.docEndDate !== data.docStartDate) docDateStr += ` ~ ${data.docEndDate}`;
+    const docDateHtml = docDateStr ? ` <span style="color:#099268; font-size:0.9em; font-weight:bold;">[발행일: ${docDateStr}]</span>` : "";
+    item.innerHTML = `<div style="display:flex; flex-direction:column; gap:15px;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; font-size:0.95em;">
+        <div>
+          <p><strong>학번/성명:</strong> ${data.studentId || ''} ${data.name || ''} (서명: ${data.studentSigned || '없음'})</p>
+          <p><strong>구분:</strong> ${data.category || ''} (${data.subCategory || ''})</p>
+          <p><strong>기간:</strong> ${data.periodStart || ''} ${data.periodEnd ? ' ~ ' + data.periodEnd : ''} (${data.totalDays || ''})</p>
+          <p><strong>사유:</strong> ${data.reasonDetail || '없음'}</p>
+        </div>
+        <div>
+          <p><strong>학부모:</strong> ${data.parentName || '없음'} (서명: ${data.parentSigned || '없음'})</p>
+          <p><strong>담임교사:</strong> ${data.teacherName || '없음'} (서명: ${data.teacherSigned || '없음'})</p>
+          <p><strong>첨부서류:</strong> <span style="color:#2b8a3e; font-weight:bold;">${data.attachments || '없음'}</span>${docDateHtml}</p>
+          <p style="color:#666; font-size:0.9em;">(NEIS 문구: ${data.neisString})</p>
+        </div>
+      </div>
+      <div style="padding:10px 15px; background:${ruleBadgeColor}; border-radius:8px; color:${ruleTextColor}; font-weight:bold; border:1px solid ${ruleTextColor}33;">${data.ruleCheck}</div>
+    </div>`;
+    container.appendChild(item);
+  }
+
+  document.getElementById('save-all-btn').onclick = () => {
+    if (extractedItems.length === 0) return;
+    const loading = document.getElementById('loading');
+    loading.querySelector('p').textContent = "시트에 저장 중...";
+    loading.classList.remove('hidden');
+    google.script.run.withSuccessHandler((msg) => {
+      loading.classList.add('hidden'); alert(msg); extractedItems = [];
+      document.getElementById('preview-list').innerHTML = "";
+      document.getElementById('extraction-preview').classList.add('hidden');
+      showSection('dashboard');
+    }).withFailureHandler((err) => {
+      loading.classList.add('hidden'); alert("저장 중 오류 발생: " + err);
+    }).saveMultipleToSheet(extractedItems);
+  };
+
+  function parseNeisFile(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        try {
+          const data = new Uint8Array(e.target.result);
+          const workbook = XLSX.read(data, { type: 'array', codepage: 949 });
+          const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+          const data2D = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
+          let grade = 0, cls = 0;
+          for (let i = 0; i < Math.min(15, data2D.length); i++) {
+            const rowStr = (data2D[i] || []).join(" ");
+            const match = rowStr.match(/(\d+)학년\s*(\d+)반/);
+            if (match) { grade = parseInt(match[1], 10); cls = parseInt(match[2], 10); break; }
+          }
+          if (!grade || !cls) {
+            const nameMatch = file.name.match(/(\d+)[-학년\s]+(\d+)/);
+            if (nameMatch) { grade = parseInt(nameMatch[1], 10); cls = parseInt(nameMatch[2], 10); }
+          }
+          resolve({ file, data2D, grade, cls });
+        } catch (err) { reject(err); }
+      };
+      reader.onerror = () => reject(new Error("파일 읽기 에러: " + file.name));
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
+  function uploadNeisDataPromise(month, data2D, filename) {
+    return new Promise((resolve, reject) => {
+      google.script.run.withSuccessHandler(res => resolve(res)).withFailureHandler(err => reject(err)).processNeisData(month, data2D, filename);
+    });
+  }
+
+  async function processNeis() {
+    const month = document.getElementById('neis-month-select').value;
+    if (!month) return alert("대상 월을 선택하세요.");
+    const files = document.getElementById('neis-file-input').files;
+    if (!files || files.length === 0) return alert("파일을 선택하세요.");
+    document.getElementById('loading').querySelector('p').textContent = "NEIS 데이터를 파싱 중입니다...";
+    document.getElementById('loading').classList.remove('hidden');
+    try {
+      const parsedFiles = [];
+      for (let i = 0; i < files.length; i++) {
+        const parsed = await parseNeisFile(files[i]); parsedFiles.push(parsed);
+      }
+      parsedFiles.sort((a, b) => {
+        if (a.grade !== b.grade) return a.grade - b.grade;
+        if (a.cls !== b.cls) return a.cls - b.cls;
+        return a.file.name.localeCompare(b.file.name, undefined, { numeric: true, sensitivity: 'base' });
+      });
+      for (let i = 0; i < parsedFiles.length; i++) {
+        const item = parsedFiles[i];
+        const classStr = item.grade && item.cls ? `${item.grade}학년 ${item.cls}반` : item.file.name;
+        document.getElementById('loading').querySelector('p').textContent = `NEIS 데이터를 저장 중입니다... (${i + 1}/${parsedFiles.length}) [${classStr}]`;
+        const res = await uploadNeisDataPromise(month, item.data2D, item.file.name);
+        if (!res.success) throw new Error(`${item.file.name} 실패: ${res.error}`);
+      }
+      document.getElementById('loading').classList.add('hidden');
+      alert(`${month}월 NEIS 통계 내역이 성공적으로 저장되었습니다.`);
+      runComparison();
+    } catch (err) {
+      document.getElementById('loading').classList.add('hidden'); alert("오류 발생: " + err.message);
+    }
+  }
+
+  function runComparison() {
+    const month = document.getElementById('neis-month-select').value || "all";
+    google.script.run.withSuccessHandler(res => {
+      const container = document.getElementById('mismatch-container');
+      document.getElementById('compare-results').classList.remove('hidden');
+      if (res.length === 0) {
+        container.innerHTML = "<p style='color: green; padding: 20px; font-weight: bold;'>✅ 모든 데이터가 일치합니다!</p>";
+      } else {
+        let html = `<div class='table-container'><table class='compare-table'><thead><tr><th>기준월</th><th>성명</th><th>학번</th><th>오류 유형</th><th>상세 내용</th></tr></thead><tbody>`;
+        res.forEach(item => {
+          let badgeClass = item.type === 'MISSING_NEIS' ? 'danger' : (item.type === 'CONTENT_MISMATCH' ? 'info' : 'warning');
+          let badgeText = item.type === 'MISSING_NEIS' ? 'NEIS 누락' : (item.type === 'CONTENT_MISMATCH' ? '통계 불일치' : '스캔본 누락');
+          html += `<tr><td>${item.date}</td><td>${item.name}</td><td>${item.studentId}</td><td><span class='badge ${badgeClass}'>${badgeText}</span></td><td>${item.details}</td></tr>`;
+        });
+        html += "</tbody></table></div>"; container.innerHTML = html;
+      }
+    }).withFailureHandler(err => alert("에러: " + err)).compareWithNeis(month);
+  }
+
+  function copyToClipboard(text) {
+    if (!text) return;
+    const el = document.createElement('textarea'); el.value = text; document.body.appendChild(el); el.select(); document.execCommand('copy'); document.body.removeChild(el);
+    const btn = event.target; const originalText = btn.textContent; btn.textContent = "✅ 복사됨!"; setTimeout(() => { btn.textContent = originalText; }, 2000);
+  }
+
+  function loadDashboardAnalytics() {
+    const month = document.getElementById('filter-month').value;
+    const cls = document.getElementById('filter-class').value;
+    document.getElementById('analytics-mismatch-body').innerHTML = `<tr><td colspan="5" style="text-align:center;">조회 중입니다...</td></tr>`;
+    document.getElementById('analytics-perfect-body').innerHTML = `<div style="grid-column: 1/-1; text-align: center; color:#666; font-size:0.9em; padding:20px;">[개근 학생 조회] 버튼을 눌러주세요</div>`;
+    document.getElementById('filtered-records-body').innerHTML = `<tr><td colspan="8" style="text-align:center;">조회 중입니다...</td></tr>`;
+    document.getElementById('perfect-count').textContent = '0명'; document.getElementById('mismatch-count').textContent = '...건';
+    document.getElementById('stat-total-scans').innerHTML = `조회 중...`; document.getElementById('stat-neis-count').innerHTML = `조회 중...`; document.getElementById('stat-match-rate').innerHTML = `조회 중...`;
+
+    google.script.run.withSuccessHandler(data => {
+      document.getElementById('stat-total-scans').innerHTML = `${data.attCount} <small>건</small>`;
+      document.getElementById('stat-neis-count').innerHTML = `${data.neisCount} <small>건</small>`;
+      document.getElementById('stat-match-rate').innerHTML = `${data.matchRate}`;
+      const fbTbody = document.getElementById('filtered-records-body');
+      if (data.filteredRecords.length === 0) {
+        fbTbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:#666;">기록이 없습니다.</td></tr>`;
+      } else {
+        data.filteredRecords.sort((a, b) => {
+          const sidA = String(a.studentId || '');
+          const sidB = String(b.studentId || '');
+          if (sidA !== sidB) {
+            return sidA.localeCompare(sidB);
+          }
+          const dateA = String(a.date || '');
+          const dateB = String(b.date || '');
+          return dateA.localeCompare(dateB);
+        });
+        fbTbody.innerHTML = data.filteredRecords.map(r => {
+          let ruleBadge = ""; let actionHtml = "-";
+          const hasError = r.ruleCheck.includes("⚠️"); const isResolved = r.actionStatus === "✅ 보완완료";
+          if (r.ruleCheck.includes("✅") || isResolved) {
+            ruleBadge = `<span class="badge" style="background:#e6fcf5; color:#099268; border:1px solid #099268; font-size:0.75em;">✅ 정상</span>`;
+          } else if (hasError) {
+            ruleBadge = `<span class="badge" title="${r.ruleCheck}" style="background:#fff9db; color:#f08c00; border:1px solid #f08c00; font-size:0.75em;">${r.ruleCheck.split(':')[0]}</span>`;
+          }
+          if (isResolved) {
+            actionHtml = `<span style="color:#099268; font-weight:bold; font-size:0.85em;">보완완료</span>`;
+          } else if (hasError) {
+            actionHtml = `<button onclick="markResolvedBtn(this, '${r.date}', '${r.studentId}')" class="btn primary" style="padding:4px 8px; font-size:0.75em; border-radius:4px;">보완조치</button>`;
+          }
+          return `<tr><td>${r.studentId}</td><td style="font-weight:600;">${r.name}</td><td>${r.category}</td><td>${r.issuedDate}</td><td>${r.reason || '-'}</td><td>${r.attachments || '-'}</td><td>${ruleBadge}</td><td>${actionHtml}</td></tr>`;
+        }).join('');
+      }
+      const mismatchTbody = document.getElementById('analytics-mismatch-body');
+      document.getElementById('mismatch-count').textContent = `${data.mismatchList.length}건`;
+      if (data.mismatchList.length === 0) {
+        mismatchTbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:green; padding:15px;">✅ 오류가 없습니다.</td></tr>`;
+      } else {
+        mismatchTbody.innerHTML = data.mismatchList.map(m => {
+          let badgeClass = 'info'; let typeLabel = '통계 불일치';
+          if (m.details.includes("나이스:0") || m.details.includes("서류:0")) {
+            if (/나이스:[1-9]\d* \/ 서류:0/.test(m.details)) { badgeClass = 'warning'; typeLabel = '스캔본 누락'; }
+            else if (/나이스:0 \/ 서류:[1-9]\d*/.test(m.details)) { badgeClass = 'danger'; typeLabel = '나이스 누락'; }
+          }
+          let prettyDetails = m.details.replace(/\n/g, '<br/>');
+          return `<tr><td style="text-align:center;">${m.date}</td><td>${m.name}</td><td>${m.studentId}</td><td style="text-align:center;"><span class="badge ${badgeClass}">${typeLabel}</span></td><td>${prettyDetails}</td></tr>`;
+        }).join('');
+      }
+      const perfectDiv = document.getElementById('analytics-perfect-body');
+      document.getElementById('perfect-count').textContent = `${data.perfectList.length}명`;
+      if (data.perfectList.length === 0) {
+        perfectDiv.innerHTML = `<div style="grid-column: 1/-1; text-align: center; color:#666;">개근 학생이 없습니다.</div>`;
+      } else {
+        perfectDiv.innerHTML = data.perfectList.map(s => `<div class="perfect-badge" style="background:#fff; border:1px solid #2b8a3e; border-radius:4px; padding:5px; text-align:center;"><div style="font-weight:bold; color:#2b8a3e;">${s.name}</div><div>${s.studentId}</div></div>`).join('');
+      }
+    }).withFailureHandler(e => alert("대시보드 로딩 실패: " + e.message)).getDashboardAnalytics(month, cls);
+  }
+
+  function generatePdfReport() {
+    const month = document.getElementById('filter-month').value;
+    const cls = document.getElementById('filter-class').value;
+    const originalDashboard = document.getElementById('interactive-dashboard-content');
+    const printWrapper = document.getElementById('batch-print-wrapper');
+    originalDashboard.style.opacity = '0.5'; document.body.style.cursor = 'wait';
+    const renderPdfReport = (classDataArr) => {
+      printWrapper.innerHTML = '';
+      classDataArr.forEach((cItem) => {
+        const data = cItem.data;
+        if (data.filteredRecords && data.filteredRecords.length > 0) {
+          data.filteredRecords.sort((a, b) => {
+            const sidA = String(a.studentId || '');
+            const sidB = String(b.studentId || '');
+            if (sidA !== sidB) {
+              return sidA.localeCompare(sidB);
+            }
+            const dateA = String(a.date || '');
+            const dateB = String(b.date || '');
+            return dateA.localeCompare(dateB);
+          });
+        }
+        const recordRows = (!data.filteredRecords || data.filteredRecords.length === 0) ? `<tr><td colspan="7" style="text-align:center; padding:20px; color:#666;">기록 없음</td></tr>` : data.filteredRecords.map(r => {
+          return `<tr><td>${r.studentId}</td><td>${r.name}</td><td>${r.category || '-'}</td><td>${r.issuedDate || '-'}</td><td>${r.reason || '-'}</td><td>${r.attachments || '-'}</td><td>${r.ruleCheck || '-'}</td></tr>`;
+        }).join('');
+        const template = `<div class="print-page page-break" style="padding: 10px;">
+           <h1 style="text-align:center; border-bottom:2px solid #000; padding-bottom:10px; margin-bottom: 20px;">출석 점검 대장 (${month === 'all' ? '전체 월' : month + '월'}, ${cItem.className})</h1>
+           <table style="width:100%; border-collapse:collapse;" border="1">
+             <thead><tr><th>학번</th><th>성명</th><th>구분</th><th>병원/발행일</th><th>사유 상세</th><th>첨부서류</th><th>보완사항</th></tr></thead>
+             <tbody>${recordRows}</tbody>
+           </table>
+         </div>`;
+        printWrapper.innerHTML += template;
+      });
+      originalDashboard.classList.add('hide-on-print');
+      setTimeout(() => {
+        window.print(); originalDashboard.style.opacity = '1'; document.body.style.cursor = 'default'; originalDashboard.classList.remove('hide-on-print'); printWrapper.innerHTML = '';
+      }, 1000);
+    };
+    if (cls === 'all') {
+      google.script.run.withSuccessHandler(classDataArr => { renderPdfReport(classDataArr); }).withFailureHandler(e => alert("에러: " + e)).getAllClassesDashboardAnalytics(month);
+    } else {
+      google.script.run.withSuccessHandler(data => { renderPdfReport([{ className: cls + '반', data: data }]); }).withFailureHandler(e => alert("에러: " + e)).getDashboardAnalytics(month, cls);
+    }
+  }
+
+  function loadPerfectAttendance() {
+    const month = document.getElementById('filter-month').value;
+    const cls = document.getElementById('filter-class').value;
+    const container = document.getElementById('analytics-perfect-body');
+    container.innerHTML = `<div style="grid-column: 1/-1; text-align: center; color:#4a86e8;">계산 중...</div>`;
+    document.getElementById('perfect-count').textContent = '...명';
+    google.script.run.withSuccessHandler(data => {
+      document.getElementById('perfect-count').textContent = `${data.perfectList.length}명`;
+      if (data.perfectList.length === 0) {
+        container.innerHTML = `<div style="grid-column: 1/-1; text-align: center; color:#666;">없음</div>`;
+      } else {
+        container.innerHTML = data.perfectList.map(s => `<div class="perfect-badge" style="background:#fff; border:1px solid #2b8a3e; border-radius:4px; padding:5px; text-align:center;"><div style="font-weight:bold; color:#2b8a3e;">${s.name}</div><div>${s.studentId}</div></div>`).join('');
+      }
+    }).getDashboardAnalytics(month, cls);
+  }
+
+  function markResolvedBtn(btn, date, sid) {
+    if (!confirm("보완완료 상태로 기록하시겠습니까?")) return;
+    const originalText = btn.textContent; btn.textContent = "처리 중..."; btn.disabled = true;
+    google.script.run.withSuccessHandler(res => {
+      if (res.includes("완료")) btn.parentElement.innerHTML = `<span style="color:#099268; font-weight:bold; font-size:0.85em;">보완완료</span>`;
+      else { alert(res); btn.textContent = originalText; btn.disabled = false; }
+    }).withFailureHandler(err => { alert("오류: " + err); btn.textContent = originalText; btn.disabled = false; }).markRecordResolved(date, sid);
+  }
+
+  function openMultiDayDocsModal() {
+    document.getElementById('multi-day-modal').classList.remove('hidden');
+    const tbody = document.getElementById('multi-day-modal-body');
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 40px;">로딩 중...</td></tr>`;
+    google.script.run.withSuccessHandler(renderMultiDayDocs).withFailureHandler(handleMultiDayDocsError).getMultiDayDocuments();
+  }
+
+  function closeMultiDayDocsModal() { document.getElementById('multi-day-modal').classList.add('hidden'); }
+
+  function renderMultiDayDocs(data) {
+    const tbody = document.getElementById('multi-day-modal-body');
+    if (!data || data.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 40px;">복수 일자 서류 내역이 없습니다.</td></tr>`; return;
+    }
+    tbody.innerHTML = data.map(item => {
+      const linkHtml = item.fileUrl ? `<a href="${item.fileUrl}" target="_blank">📄 ${item.filename}</a>` : `<span>${item.filename}</span>`;
+      return `<tr><td style="text-align: center;">${item.month || '-'}</td><td>${item.name || '-'}</td><td style="text-align: center;">${item.studentId || '-'}</td><td>${item.category || '-'}</td><td>${item.period || '-'}</td><td>${linkHtml}</td></tr>`;
+    }).join('');
+  }
+
+  function handleMultiDayDocsError(err) {
+    document.getElementById('multi-day-modal-body').innerHTML = `<tr><td colspan="6" style="text-align: center; color: #c0392b; padding: 40px;">오류: ${err.message || err}</td></tr>`;
+  }
+
+  function rebuildAttendanceData() {
+    const month = document.getElementById('rebuild-month-select').value;
+    const cls = document.getElementById('rebuild-class-select').value;
+
+    let confirmMsg = "AttendanceData 대조 데이터를 재생성하시겠습니까?";
+    if (month !== 'all' || cls !== 'all') {
+      const monthStr = month === 'all' ? '전체 월' : `${month}월`;
+      const classStr = cls === 'all' ? '전체 학급' : `${cls}반`;
+      confirmMsg = `[${monthStr} / ${classStr}] 대상으로 AttendanceData 대조 데이터를 재생성하시겠습니까?\n(선택된 조건 외의 기존 대조 데이터는 안전하게 유지됩니다.)`;
+    }
+
+    if (!confirm(confirmMsg)) return;
+    const loading = document.getElementById('loading');
+    loading.querySelector('p').textContent = "AttendanceData 시트 재생성 중...";
+    loading.classList.remove('hidden');
+    google.script.run.withSuccessHandler(res => {
+      loading.classList.add('hidden'); alert(res); loadDashboardAnalytics();
+    }).withFailureHandler(err => {
+      loading.classList.add('hidden'); alert("재생성 실패: " + err);
+    }).reconcileNeisWithAttendance(month, cls);
+  }
+</script>
