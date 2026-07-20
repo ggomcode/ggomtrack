@@ -15,13 +15,6 @@
       const classesSelect = document.getElementById('setting-classes');
       if (gradeSelect) gradeSelect.value = settings.grade;
       if (classesSelect) classesSelect.value = settings.classes;
-
-      const geminiInput = document.getElementById('setting-gemini-key');
-      const uploadInput = document.getElementById('setting-upload-id');
-      const neisInput = document.getElementById('setting-neis-id');
-      if (geminiInput) geminiInput.value = settings.geminiApiKey || '';
-      if (uploadInput) uploadInput.value = settings.uploadFolderId || '';
-      if (neisInput) neisInput.value = settings.neisFolderId || '';
     }).getSystemSettings();
   }
 
@@ -61,28 +54,6 @@
       loading.classList.add('hidden');
       alert("에러 발생: " + err);
     }).saveSystemSettings(grade, classes);
-  }
-
-  function saveApiSettings() {
-    const geminiKey = document.getElementById('setting-gemini-key').value;
-    const uploadId = document.getElementById('setting-upload-id').value;
-    const neisId = document.getElementById('setting-neis-id').value;
-
-    const loading = document.getElementById('loading');
-    loading.querySelector('p').textContent = "API 및 폴더 설정 저장 중...";
-    loading.classList.remove('hidden');
-
-    google.script.run.withSuccessHandler(res => {
-      loading.classList.add('hidden');
-      if (res.success) {
-        alert("API 및 폴더 설정이 성공적으로 저장되었습니다.");
-      } else {
-        alert("설정 저장 실패: " + res.error);
-      }
-    }).withFailureHandler(err => {
-      loading.classList.add('hidden');
-      alert("에러 발생: " + err);
-    }).saveApiSettings(geminiKey, uploadId, neisId);
   }
 
   function showSection(id) {
@@ -238,7 +209,7 @@
   async function handleFiles(fileList) {
     const loading = document.getElementById('loading');
     loading.classList.remove('hidden');
-    const files = Array.from(fileList).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+    const files = Array.from(fileList);
     try {
       for (const file of files) await processFile(file);
     } catch (e) {
@@ -286,10 +257,12 @@
   }
 
   function sendToAi(filename, base64, thumb, callback) {
-    google.script.run.withSuccessHandler(res => {
+    google.script.run.withSuccessHandler(async res => {
       try {
         if (res.success) {
-          res.data.forEach(item => processItemWithValidation(filename, item, thumb));
+          for (const item of res.data) {
+            await processItemWithValidation(filename, item, thumb);
+          }
         } else { alert(filename + " 분석 실패: " + res.error); }
       } catch (err) { alert(filename + " 처리 중 오류 발생"); } finally { if (callback) callback(); }
     }).withFailureHandler(err => {
@@ -304,15 +277,22 @@
       if (dateParts.length === 3) {
         const year = parseInt(dateParts[0]); const month = parseInt(dateParts[1]) - 1; const day = parseInt(dateParts[2]);
         const d = new Date(year, month, day); const dayOfWeek = d.getDay();
-        const hospitalKeywords = ["진료", "진단", "소견", "처방", "통원", "입원", "약국", "병원"];
-        const isHospitalDoc = hospitalKeywords.some(kw => item.attachments && item.attachments.includes(kw));
+        const hospitalKeywords = ["진료", "진단", "처방", "통원", "입원", "퇴원", "입퇴원", "입·퇴원", "입/퇴원", "입-퇴원", "소견", "약", "영수증", "보건", "보건실", "입실", "확인증", "병원", "약국", "의원", "치과", "한의원"];
+        const cleanAttach = item.attachments ? String(item.attachments).replace(/\s+/g, "") : "";
+        const cleanIssuer = item.issuer ? String(item.issuer).replace(/\s+/g, "") : "";
+        const isHospitalDoc = hospitalKeywords.some(kw => cleanAttach.includes(kw) || cleanIssuer.includes(kw));
         if (dayOfWeek === 1 && !isHospitalDoc) {
           item.ruleCheck = "⚠️ 보완 필요: 월요일은 학부모/담임 확인서로 결석 대체 불가";
         } else {
           const prev = new Date(year, month, day);
           if (dayOfWeek === 0) prev.setDate(d.getDate() - 2); else prev.setDate(d.getDate() - 1);
           const prevStr = prev.getFullYear() + "-" + String(prev.getMonth() + 1).padStart(2, '0') + "-" + String(prev.getDate()).padStart(2, '0');
-          const foundInFront = extractedItems.some(ex => String(ex.studentId).trim() === String(item.studentId).trim() && ex.date === prevStr && ex.subCategory && ex.subCategory.includes('질병') && ex.attachments && (ex.attachments.includes('진료') || ex.attachments.includes('진단')));
+          const foundInFront = extractedItems.some(ex => {
+            const cleanExAttach = ex.attachments ? String(ex.attachments).replace(/\s+/g, "") : "";
+            const cleanExIssuer = ex.issuer ? String(ex.issuer).replace(/\s+/g, "") : "";
+            const exDateStr = (ex.date || ex.periodStart || "").split(' ')[0];
+            return String(ex.studentId).trim() === String(item.studentId).trim() && exDateStr === prevStr && ex.category && ex.category.includes('질병') && (cleanExAttach || cleanExIssuer) && hospitalKeywords.some(kw => cleanExAttach.includes(kw) || cleanExIssuer.includes(kw));
+          });
           if (foundInFront) {
             item.ruleCheck = "✅ 정상 (전일 병원기록 동시 업로드 확인됨)";
           } else {
@@ -560,13 +540,84 @@
             return dateA.localeCompare(dateB);
           });
         }
-        const recordRows = (!data.filteredRecords || data.filteredRecords.length === 0) ? `<tr><td colspan="7" style="text-align:center; padding:20px; color:#666;">기록 없음</td></tr>` : data.filteredRecords.map(r => {
-          return `<tr><td>${r.studentId}</td><td>${r.name}</td><td>${r.category || '-'}</td><td>${r.issuedDate || '-'}</td><td>${r.reason || '-'}</td><td>${r.attachments || '-'}</td><td>${r.ruleCheck || '-'}</td></tr>`;
+        if (data.attendanceDataList && data.attendanceDataList.length > 0) {
+          data.attendanceDataList.sort((a, b) => {
+            const sidA = String(a.studentId || '');
+            const sidB = String(b.studentId || '');
+            if (sidA !== sidB) {
+              return sidA.localeCompare(sidB);
+            }
+            const monthA = String(a.month || '');
+            const monthB = String(b.month || '');
+            return monthA.localeCompare(monthB);
+          });
+        }
+
+        let summaryTableHtml = '';
+        if (data.attendanceDataList && data.attendanceDataList.length > 0) {
+          const isAllMonths = month === 'all';
+          const formatVal = (val) => (val === 0 || !val) ? '' : val;
+
+          const summaryRows = data.attendanceDataList.map(s => {
+            return `<tr>
+              <td>${s.studentId}</td>
+              <td ${!isAllMonths ? 'class="thick-border-right"' : ''} style="font-weight: 600;">${s.name}</td>
+              ${isAllMonths ? `<td class="thick-border-right">${s.month}월</td>` : ''}
+              <td>${formatVal(s.absent_disease)}</td>
+              <td>${formatVal(s.absent_unauthorized)}</td>
+              <td>${formatVal(s.absent_other)}</td>
+              <td class="thick-border-right">${formatVal(s.absent_recognized)}</td>
+              <td>${formatVal(s.tardy_disease)}</td>
+              <td>${formatVal(s.tardy_unauthorized)}</td>
+              <td>${formatVal(s.tardy_other)}</td>
+              <td class="thick-border-right">${formatVal(s.tardy_recognized)}</td>
+              <td>${formatVal(s.early_disease)}</td>
+              <td>${formatVal(s.early_unauthorized)}</td>
+              <td>${formatVal(s.early_other)}</td>
+              <td class="thick-border-right">${formatVal(s.early_recognized)}</td>
+              <td>${formatVal(s.skipped_disease)}</td>
+              <td>${formatVal(s.skipped_unauthorized)}</td>
+              <td>${formatVal(s.skipped_other)}</td>
+              <td>${formatVal(s.skipped_recognized)}</td>
+            </tr>`;
+          }).join('');
+
+          summaryTableHtml = `
+            <h2 style="font-size: 1.05rem; margin-top: 15px; margin-bottom: 8px; border-left: 4px solid #4a90e2; padding-left: 8px; font-family: 'Outfit', sans-serif;">📊 출결 변동 학생 집계</h2>
+            <table class="summary-table" style="width:100%; border-collapse:collapse; margin-bottom: 25px;" border="1">
+              <thead>
+                <tr style="background-color: #f1f3f5;">
+                  <th rowspan="2">학번</th>
+                  <th rowspan="2" ${!isAllMonths ? 'class="thick-border-right"' : ''}>성명</th>
+                  ${isAllMonths ? `<th rowspan="2" class="thick-border-right">월</th>` : ''}
+                  <th colspan="4" class="thick-border-right">결석</th>
+                  <th colspan="4" class="thick-border-right">지각</th>
+                  <th colspan="4" class="thick-border-right">조퇴</th>
+                  <th colspan="4">결과</th>
+                </tr>
+                <tr style="background-color: #f1f3f5;">
+                  <th>질병</th><th>미인정</th><th>기타</th><th class="thick-border-right">인정</th>
+                  <th>질병</th><th>미인정</th><th>기타</th><th class="thick-border-right">인정</th>
+                  <th>질병</th><th>미인정</th><th>기타</th><th class="thick-border-right">인정</th>
+                  <th>질병</th><th>미인정</th><th>기타</th><th>인정</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${summaryRows}
+              </tbody>
+            </table>
+          `;
+        }
+
+        const recordRows = (!data.filteredRecords || data.filteredRecords.length === 0) ? `<tr><td colspan="9" style="text-align:center; padding:20px; color:#666;">기록 없음</td></tr>` : data.filteredRecords.map(r => {
+          return `<tr><td>${r.studentId}</td><td>${r.name}</td><td>${r.category || '-'}</td><td>${r.periodStart || '-'}</td><td>${r.periodEnd || '-'}</td><td>${r.totalDays || '-'}</td><td>${r.reason || '-'}</td><td>${r.attachments || '-'}</td><td>${r.ruleCheck || '-'}</td></tr>`;
         }).join('');
         const template = `<div class="print-page page-break" style="padding: 10px;">
            <h1 style="text-align:center; border-bottom:2px solid #000; padding-bottom:10px; margin-bottom: 20px;">출석 점검 대장 (${month === 'all' ? '전체 월' : month + '월'}, ${cItem.className})</h1>
+           ${summaryTableHtml}
+           <h2 style="font-size: 1.05rem; margin-top: 15px; margin-bottom: 8px; border-left: 4px solid #4a90e2; padding-left: 8px; font-family: 'Outfit', sans-serif;">📋 출석 증빙서류 접수 상세 기록</h2>
            <table style="width:100%; border-collapse:collapse;" border="1">
-             <thead><tr><th>학번</th><th>성명</th><th>구분</th><th>병원/발행일</th><th>사유 상세</th><th>첨부서류</th><th>보완사항</th></tr></thead>
+             <thead><tr style="background-color: #f1f3f5;"><th>학번</th><th>성명</th><th>구분</th><th>시작일</th><th>종료일</th><th>일수</th><th>사유 상세</th><th>첨부서류</th><th>보완사항</th></tr></thead>
              <tbody>${recordRows}</tbody>
            </table>
          </div>`;
@@ -653,5 +704,20 @@
     }).withFailureHandler(err => {
       loading.classList.add('hidden'); alert("재생성 실패: " + err);
     }).reconcileNeisWithAttendance(month, cls);
+  }
+
+  function syncAttendanceData() {
+    if (!confirm("스프레드시트의 수동 변경 내용을 대시보드에 반영하기 위해 대조 데이터를 동기화(재계산)하시겠습니까?\n(1,000건 이상의 데이터를 처리하므로 약 3~5초 소요됩니다.)")) return;
+    const loading = document.getElementById('loading');
+    loading.querySelector('p').textContent = "대조 데이터 동기화 중...";
+    loading.classList.remove('hidden');
+    google.script.run.withSuccessHandler(res => {
+      loading.classList.add('hidden');
+      alert(res);
+      loadDashboardAnalytics(); // 대시보드 새로고침
+    }).withFailureHandler(err => {
+      loading.classList.add('hidden');
+      alert("동기화 실패: " + err);
+    }).reconcileAttendanceDataSheetDirectly(false); // isSilent = false
   }
 </script>

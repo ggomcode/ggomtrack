@@ -306,12 +306,17 @@
         <!-- 학년 및 학급 설정 카드 -->
         <div class="card" style="border-left: 5px solid #4a90e2; margin-bottom: 20px;">
           <h2>⚙️ 학년 및 학급 설정</h2>
-          <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 15px;">이 시스템에서 관리할 대상 학년과 전체 학급 수를 설정합니다. 설정된 학년 외의 데이터는 대조 및 분석에서 제외됩니다.</p>
-          <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+          <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 15px;">이 시스템에서 관리할 대상 학년과 전체 학급 수를
+            설정합니다. 설정된 학년 외의 데이터는 대조 및 분석에서 제외됩니다.</p>
+          <div
+            style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
               <div>
-                <label style="font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px; display: block;">대상 학년</label>
-                <select id="setting-grade" style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem;">
+                <label
+                  style="font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px; display: block;">대상
+                  학년</label>
+                <select id="setting-grade"
+                  style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem;">
                   <option value="1">1학년</option>
                   <option value="2">2학년</option>
                   <option value="3" selected>3학년</option>
@@ -321,8 +326,11 @@
                 </select>
               </div>
               <div>
-                <label style="font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px; display: block;">전체 학급 수</label>
-                <select id="setting-classes" style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem;">
+                <label
+                  style="font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px; display: block;">전체 학급
+                  수</label>
+                <select id="setting-classes"
+                  style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem;">
                   <option value="1">1학급</option>
                   <option value="2">2학급</option>
                   <option value="3">3학급</option>
@@ -346,30 +354,45 @@
                 </select>
               </div>
             </div>
-            <button onclick="saveSystemSettings()" class="btn primary" style="padding: 10px; font-size: 0.9rem; border-radius: 8px; background: linear-gradient(135deg, #4a90e2, #5c6bc0); border: none; color: white; font-weight: bold; cursor: pointer;">💾 설정 저장</button>
+            <button onclick="saveSystemSettings()" class="btn primary"
+              style="padding: 10px; font-size: 0.9rem; border-radius: 8px; background: linear-gradient(135deg, #4a90e2, #5c6bc0); border: none; color: white; font-weight: bold; cursor: pointer;">💾
+              설정 저장</button>
           </div>
         </div>
 
         <!-- API 및 폴더 설정 카드 -->
         <div class="card" style="border-left: 5px solid #10b981; margin-bottom: 20px;">
           <h2>🔑 시스템 API 및 폴더 설정</h2>
-          <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 15px;">Gemini API 키 및 구글 드라이브 폴더 ID는 구글 서버의 안전한 스크립트 속성(Script Properties)에 저장되어 Git에 커밋되지 않습니다.</p>
-          <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+          <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 15px;">Gemini API 키 및 구글 드라이브 폴더 ID는 구글
+            서버의 안전한 스크립트 속성(Script Properties)에 저장되어 Git에 커밋되지 않습니다.</p>
+          <div
+            style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
             <div>
-              <label style="font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px; display: block;">Gemini API Key</label>
-              <input type="password" id="setting-gemini-key" placeholder="AIzaSy..." style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem;">
+              <label
+                style="font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px; display: block;">Gemini
+                API Key</label>
+              <input type="password" id="setting-gemini-key" placeholder="AIzaSy..."
+                style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem;">
             </div>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
               <div>
-                <label style="font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px; display: block;">스캔본 업로드 폴더 ID</label>
-                <input type="text" id="setting-upload-id" placeholder="Google Drive 폴더 ID" style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem;">
+                <label
+                  style="font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px; display: block;">스캔본
+                  업로드 폴더 ID</label>
+                <input type="text" id="setting-upload-id" placeholder="Google Drive 폴더 ID"
+                  style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem;">
               </div>
               <div>
-                <label style="font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px; display: block;">NEIS 파일 보관 폴더 ID</label>
-                <input type="text" id="setting-neis-id" placeholder="Google Drive 폴더 ID" style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem;">
+                <label
+                  style="font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 4px; display: block;">NEIS
+                  파일 보관 폴더 ID</label>
+                <input type="text" id="setting-neis-id" placeholder="Google Drive 폴더 ID"
+                  style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem;">
               </div>
             </div>
-            <button onclick="saveApiSettings()" class="btn primary" style="padding: 10px; font-size: 0.9rem; border-radius: 8px; background: linear-gradient(135deg, #10b981, #059669); border: none; color: white; font-weight: bold; cursor: pointer;">💾 API 및 폴더 설정 저장</button>
+            <button onclick="saveApiSettings()" class="btn primary"
+              style="padding: 10px; font-size: 0.9rem; border-radius: 8px; background: linear-gradient(135deg, #10b981, #059669); border: none; color: white; font-weight: bold; cursor: pointer;">💾
+              API 및 폴더 설정 저장</button>
           </div>
         </div>
 

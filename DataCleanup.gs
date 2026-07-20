@@ -121,14 +121,18 @@ function fixLegacyAttendanceData() {
     // 6. T열 (규정위반여부)
     let tVal = "";
     const docStr = String(values[i][14] || "").trim(); // O열 첨부서류
+    const issuerStr = String(values[i][13] || "").trim(); // N열 발급처
     const sid = String(values[i][1]); // B열 학번
     
     if (cat === "질병") {
-        const hasHospital = /진료|진단|소견|처방|통원|입원|병원|약국|약|영수증/.test(docStr);
-        const hasSubstitute = /학부모|담임|확인서|의견서|서명/.test(docStr);
+        // 보건실 입실 확인증도 질병 증빙 서류로 정당 인정하도록 키워드 추가
+        const cleanDocStr = docStr ? docStr.replace(/\s+/g, "") : "";
+        const cleanIssuerStr = issuerStr ? issuerStr.replace(/\s+/g, "") : "";
+        const hasHospital = /진료|진단|소견|처방|통원|입원|퇴원|입퇴원|입·퇴원|입\/퇴원|입-퇴원|병원|약국|약|영수증|보건실|입실|확인증|의원|치과|한의원/.test(cleanDocStr) || /진료|진단|소견|처방|통원|입원|퇴원|입퇴원|입·퇴원|입\/퇴원|입-퇴원|병원|약국|약|영수증|보건실|입실|확인증|의원|치과|한의원/.test(cleanIssuerStr);
+        const hasSubstitute = /학부모|담임|확인서|의견서|서명/.test(cleanDocStr);
         
         const curDateObj = new Date(values[i][0]); // A열 기준
-        let state = diseaseState.get(sid) || { date: null, count: 0 };
+        let state = diseaseState.get(sid) || { date: null, count: 0, lastDayHadHospital: false };
         
         let isConsecutive = false;
         if (state.date) {
@@ -146,17 +150,67 @@ function fixLegacyAttendanceData() {
            state.count = 1;
         }
         state.date = curDateObj;
-        diseaseState.set(sid, state);
         
-        if (state.count % 2 === 1) { // 1, 3, 5일차
-           if (!hasHospital) tVal = "체크필요 [질병 결석(홀수일차)은 병원/약국 서류 필수]";
-        } else { // 2, 4, 6일차
-           if (!hasHospital && !hasSubstitute) tVal = "체크필요 [질병 결석(짝수일차)은 학부모확인서 또는 병원서류 필수]";
+        if (state.count % 2 === 1) { // 1, 3, 5일차 등 홀수일차
+           let isOk = hasHospital;
+           // 병원서류가 없더라도, 대체확인서가 첨부되어 있고 직전결석일에 병원서류가 있었다면 대체 인정
+           if (!isOk && hasSubstitute && isConsecutive && state.lastDayHadHospital) {
+              isOk = true;
+           }
+           if (!isOk) {
+              tVal = "⚠️ 체크필요 [질병 결석(홀수일차)은 병원/약국 서류 필수]";
+           }
+        } else { // 2, 4, 6일차 등 짝수일차
+           if (!hasHospital && !hasSubstitute) {
+              tVal = "⚠️ 체크필요 [질병 결석(짝수일차)은 학부모확인서 또는 병원서류 필수]";
+           }
+        }
+        
+        // 다음 결석일 검사를 위해 현재 결석일에 병원 서류(또는 보건실 확인증)가 있었는지 여부를 저장
+        state.lastDayHadHospital = hasHospital;
+        diseaseState.set(sid, state);
+    } else if (cat === "출석인정") {
+        const eventRules = getFamilyEventRules(reason);
+        if (eventRules) {
+            const startYear = 2025;
+            const endYear = 2028;
+            const holidays = getHolidaysSet(startYear, endYear);
+            const schoolHolidays = getDiscretionaryHolidays();
+            schoolHolidays.forEach(h => holidays.add(h));
+
+            // 시작/종료일의 날짜 부분 추출
+            const startDateStr = values[i][6] ? String(values[i][6]).split(' ')[0] : ""; // G열 시작일시
+            const endDateStr = values[i][7] ? String(values[i][7]).split(' ')[0] : "";   // H열 종료일시
+            
+            // 실제 소요 학업일수 계산
+            const schoolDaysTaken = countSchoolDays(startDateStr, endDateStr, holidays);
+            
+            const errors = [];
+            
+            // 규정 1: 경조사 허용일수 초과 검증
+            if (schoolDaysTaken > eventRules.allowedDays) {
+                errors.push(`허용일수 초과 (허용 ${eventRules.allowedDays}일 / 신청 ${schoolDaysTaken}일)`);
+            }
+            
+            // 규정 2: 발생일 동반 검증
+            const eventDateStr = values[i][15] ? String(values[i][15]).split(' ')[0] : ""; // P열 통원일(발생일)
+            if (eventDateStr && startDateStr) {
+                const isValidStart = isValidFamilyEventStartDate(eventDateStr, startDateStr, eventRules.isDeath, holidays);
+                if (!isValidStart) {
+                    errors.push(`시작일 규정 위반 (발생일: ${eventDateStr}, 신청일: ${startDateStr})`);
+                }
+            }
+            
+            if (errors.length > 0) {
+                tVal = "⚠️ 체크필요 [" + errors.join(", ") + "]";
+            }
+        } else if (docStr === "×" || docStr === "") {
+            tVal = "⚠️ 체크필요 [출석인정 사유 관련 첨부서류 누락 의심]";
         }
     } else if (cat !== "미인정" && !reason.includes("생리")) {
-        // 출석인정, 기타결석 등 (미인정과 생리결석 제외)
+        // 기타결석 등 (미인정과 생리결석, 출석인정 제외)
         if (docStr === "×" || docStr === "") {
-            tVal = "체크필요 [질병 외 사유(출석인정 등) 관련 첨부서류 누락 의심]";
+            tVal = "⚠️ 체크필요 [질병/출석인정 외 사유(기타 등) 관련 첨부서류 누락 의심]";
         }
     }
     
